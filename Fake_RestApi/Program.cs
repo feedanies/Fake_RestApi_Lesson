@@ -5,14 +5,12 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using Fake_RestApi.Dto;
 
 namespace Fake_RestApi
 {
     internal class Program
     {
-
-        public static FakeApiDBContext context = new FakeApiDBContext();
-        public static ProductRepository repo = new ProductRepository(context);
 
         static async Task Main(string[] args)
         {
@@ -94,8 +92,14 @@ namespace Fake_RestApi
 
         public static class Router
         {
+
             public static async Task<string> HandleAsync(HttpRequest request)
             {
+                // 2-ci addim: her sorgu ucun yeni context ve repo
+                using var context = new FakeApiDBContext();
+                var repo = new ProductRepository(context);
+                var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
                 // GET /products  -> butun mehsullar
                 if (request.Method == "GET" && request.Path == "/products")
                 {
@@ -123,23 +127,27 @@ namespace Fake_RestApi
                 // POST /products  -> body: { "name": "...", "price": 10.5 }
                 if (request.Method == "POST" && request.Path == "/products")
                 {
-                    Product? newProduct;
+                    CreateProductDto? dto;
                     try
                     {
-                        newProduct = JsonSerializer.Deserialize<Product>(request.Body!,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        dto = JsonSerializer.Deserialize<CreateProductDto>(request.Body!, jsonOptions);
                     }
                     catch (JsonException)
                     {
                         return HttpResponse.Json(new { message = "Invalid JSON body" });
                     }
 
-                    if (newProduct is null)
+                    if (dto is null || string.IsNullOrWhiteSpace(dto.Name))
                     {
-                        return HttpResponse.Json(new { message = "Body is empty" });
+                        return HttpResponse.Json(new { message = "Invalid product data" });
                     }
 
-                    newProduct.Id = 0; // Id-ni database ozu versin
+                    var newProduct = new Product
+                    {
+                        Name = dto.Name,
+                        Price = dto.Price
+                    };
+
                     var added = repo.Add(newProduct);
                     if (!added)
                     {
@@ -158,20 +166,19 @@ namespace Fake_RestApi
                         return HttpResponse.Json(new { message = "Invalid product id" });
                     }
 
-                    Product? updatedData;
+                    UpdateProductDto? dto;
                     try
                     {
-                        updatedData = JsonSerializer.Deserialize<Product>(request.Body!,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        dto = JsonSerializer.Deserialize<UpdateProductDto>(request.Body!, jsonOptions);
                     }
                     catch (JsonException)
                     {
                         return HttpResponse.Json(new { message = "Invalid JSON body" });
                     }
 
-                    if (updatedData is null)
+                    if (dto is null || string.IsNullOrWhiteSpace(dto.Name))
                     {
-                        return HttpResponse.Json(new { message = "Body is empty" });
+                        return HttpResponse.Json(new { message = "Invalid product data" });
                     }
 
                     var existing = await repo.GetProduct(id);
@@ -181,8 +188,8 @@ namespace Fake_RestApi
                     }
 
                     // movcud (track olunan) obyekti deyisirik
-                    existing.Name = updatedData.Name;
-                    existing.Price = updatedData.Price;
+                    existing.Name = dto.Name;
+                    existing.Price = dto.Price;
 
                     var updated = repo.Update(existing);
                     if (!updated)
